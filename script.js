@@ -9,55 +9,70 @@ document.addEventListener('DOMContentLoaded', () => {
     const errorMessageElement = document.getElementById('error-message');
     const videoFilterInput = document.getElementById('video-filter');
 
-    // --- Configuration ---
-    // Option 1: Manually list your video IDs here.
-    // This is simpler to start but requires manual updates.
-    const videoIds = [
-        "qgYK9k2KF7Q", // Replace with actual video IDs
-        "56JvXvA51ls", // Add more video IDs as needed
-        // Add all your video IDs from the 'data' folder filenames (without .json)
-    ];
+    let availableVideoIds = []; // Store fetched video IDs globally within the scope
 
-    // Option 2: Use a manifest file (Advanced - Requires setup)
-    // If you have many files, generate a `video_ids.json` file
-    // containing an array of IDs: `["ID1", "ID2", ...]`.
-    // Then fetch it like this:
-    // async function fetchVideoIds() {
-    //     try {
-    //         const response = await fetch('./video_ids.json'); // Adjust path if needed
-    //         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-    //         const ids = await response.json();
-    //         populateVideoList(ids);
-    //     } catch (error) {
-    //         console.error("Error fetching video ID list:", error);
-    //         listLoadingElement.textContent = 'Error loading video list.';
-    //         listLoadingElement.style.color = 'red';
-    //     }
-    // }
-    // fetchVideoIds(); // Call this instead of populateVideoList(videoIds) below
+    // --- Fetch Video List from Manifest ---
+    async function loadVideoList() {
+        if (!videoListElement || !listLoadingElement) return;
+        listLoadingElement.textContent = 'Loading video list...';
+        listLoadingElement.style.display = 'block'; // Ensure it's visible
 
-    // --- Populate Video List ---
+        try {
+            const response = await fetch('./manifest.json'); // Fetch the generated manifest
+            if (!response.ok) {
+                 // Try fetching from data/manifest.json as a fallback (less ideal)
+                 console.warn("manifest.json not found at root, trying ./data/manifest.json");
+                 const fallbackResponse = await fetch('./data/manifest.json');
+                 if (!fallbackResponse.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status} (and fallback failed)`);
+                 }
+                 availableVideoIds = await fallbackResponse.json();
+            } else {
+                 availableVideoIds = await response.json();
+            }
+
+
+            if (!Array.isArray(availableVideoIds)) {
+                throw new Error("Manifest file does not contain a valid JSON array.");
+            }
+
+            populateVideoList(availableVideoIds);
+            checkUrlHashForInitialLoad(); // Check hash *after* list is loaded
+
+        } catch (error) {
+            console.error("Error loading or parsing manifest.json:", error);
+            videoListElement.innerHTML = ''; // Clear list area
+            listLoadingElement.textContent = 'Error loading video list. Make sure manifest.json exists and is valid.';
+            listLoadingElement.style.color = 'red';
+        }
+    }
+
+    // --- Populate Video List (Now uses fetched IDs) ---
     function populateVideoList(ids) {
-        if (!videoListElement) return;
-        videoListElement.innerHTML = ''; // Clear loading message or previous list
+        videoListElement.innerHTML = ''; // Clear loading message
+        listLoadingElement.style.display = 'none'; // Hide loading message
+
         if (ids.length === 0) {
-             videoListElement.innerHTML = '<li>No videos found.</li>';
+             const li = document.createElement('li');
+             li.textContent = 'No videos found in manifest.';
+             li.style.fontStyle = 'italic';
+             li.style.color = '#888';
+             videoListElement.appendChild(li);
              return;
         }
 
-        ids.sort().forEach(id => { // Sort IDs alphabetically
+        // No need to sort here if manifest generation script already sorts
+        ids.forEach(id => {
             const listItem = document.createElement('li');
             const link = document.createElement('a');
-            link.href = `#${id}`; // Use hash for navigation state
+            link.href = `#${id}`;
             link.textContent = id;
-            link.dataset.videoId = id; // Store ID for easy access
+            link.dataset.videoId = id;
             link.addEventListener('click', (e) => {
-                e.preventDefault(); // Prevent default anchor jump
+                e.preventDefault();
                 loadComments(id);
-                // Update active state
                 document.querySelectorAll('#video-list a').forEach(a => a.classList.remove('active'));
                 link.classList.add('active');
-                // Update URL hash
                 window.location.hash = id;
             });
             listItem.appendChild(link);
@@ -79,38 +94,34 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-
-    // --- Load and Display Comments ---
+    // --- Load and Display Comments (No changes needed here) ---
     async function loadComments(videoId) {
         if (!videoId) return;
 
-        // Update UI state
         currentVideoTitleElement.textContent = `Comments for: ${videoId}`;
         youtubeLinkElement.href = `https://www.youtube.com/watch?v=${videoId}`;
         videoLinkContainer.style.display = 'block';
-        commentsContainer.innerHTML = ''; // Clear previous comments
-        errorMessageElement.style.display = 'none'; // Hide previous errors
-        loadingIndicator.style.display = 'block'; // Show loading indicator
+        commentsContainer.innerHTML = '';
+        errorMessageElement.style.display = 'none';
+        loadingIndicator.style.display = 'block';
 
         try {
             const response = await fetch(`./data/${videoId}.json`);
             if (!response.ok) {
                 throw new Error(`Could not load comments. Status: ${response.status}`);
             }
-            const text = await response.text(); // Read response as text (for NDJSON)
-
-            // Parse NDJSON (Newline Delimited JSON)
+            const text = await response.text();
             const comments = text.trim().split('\n')
-                .filter(line => line.trim() !== '') // Remove empty lines
+                .filter(line => line.trim() !== '')
                 .map((line, index) => {
                     try {
                         return JSON.parse(line);
                     } catch (parseError) {
                         console.error(`Error parsing line ${index + 1} in ${videoId}.json:`, parseError, "Line content:", line);
-                        return null; // Skip lines that fail to parse
+                        return null;
                     }
                 })
-                .filter(comment => comment !== null); // Filter out skipped lines
+                .filter(comment => comment !== null);
 
             renderComments(comments, videoId);
 
@@ -118,41 +129,39 @@ document.addEventListener('DOMContentLoaded', () => {
             console.error(`Error loading comments for ${videoId}:`, error);
             errorMessageElement.textContent = `Failed to load comments for ${videoId}. ${error.message}. Check if the file exists in the 'data' folder and is correctly formatted.`;
             errorMessageElement.style.display = 'block';
-            commentsContainer.innerHTML = '<p>Could not load comments.</p>'; // Clear area
+            commentsContainer.innerHTML = '<p>Could not load comments.</p>';
         } finally {
-            loadingIndicator.style.display = 'none'; // Hide loading indicator
+            loadingIndicator.style.display = 'none';
         }
     }
 
-    // --- Render Comments to HTML ---
+    // --- Render Comments to HTML (No changes needed here) ---
     function renderComments(comments, videoId) {
-        commentsContainer.innerHTML = ''; // Clear previous content or loading message
+        commentsContainer.innerHTML = '';
 
         if (comments.length === 0) {
             commentsContainer.innerHTML = '<p>No comments found for this video (or the file is empty/invalid).</p>';
             return;
         }
 
-        const fragment = document.createDocumentFragment(); // More efficient for appending many elements
+        const fragment = document.createDocumentFragment();
 
         comments.forEach(comment => {
             const commentElement = document.createElement('div');
             commentElement.className = 'comment';
 
-            // Sanitize potentially unsafe values (basic example)
-            const safeText = comment.text.replace(/</g, "<").replace(/>/g, ">");
+            const safeText = comment.text?.replace(/</g, "<").replace(/>/g, ">") || '';
             const safeAuthor = (comment.author || 'Unknown Author').replace(/</g, "<").replace(/>/g, ">");
             const safeTime = (comment.time || 'Unknown time').replace(/</g, "<").replace(/>/g, ">");
             const safeVotes = (comment.votes || '0').replace(/</g, "<").replace(/>/g, ">");
-            const safeReplies = (comment.replies || '0').replace(/</g, "<").replace(/>/g, ">"); // Assuming 'replies' might be a count
+            const safeReplies = (comment.replies || '0').replace(/</g, "<").replace(/>/g, ">");
 
-            // Construct author channel link
             const authorChannelLink = comment.channel ? `https://www.youtube.com/channel/${comment.channel}` : '#';
             const authorTarget = comment.channel ? '_blank' : '_self';
 
             commentElement.innerHTML = `
                 <div class="comment-photo">
-                    <img src="${comment.photo || 'placeholder.png'}" alt="${safeAuthor}'s profile picture" loading="lazy">
+                    <img src="${comment.photo || 'placeholder.png'}" alt="${safeAuthor}'s profile picture" loading="lazy" onerror="this.style.display='none'"> <!-- Hide broken images -->
                 </div>
                 <div class="comment-content">
                     <div class="comment-header">
@@ -163,12 +172,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="comment-text">${safeText.replace(/\n/g, '<br>')}</div>
                     <div class="comment-meta">
                         <span class="comment-votes">${safeVotes}</span>
-                        ${comment.replies ? `<span class="comment-replies">${safeReplies} Replies</span>` : ''}
+                        ${comment.replies && comment.replies !== "0" ? `<span class="comment-replies">${safeReplies} Replies</span>` : ''}
                         ${comment.heart ? '<span class="comment-heart">Hearted by Gura</span>' : ''}
                     </div>
                 </div>
             `;
-            // Add link to specific comment if CID is available
+
             const commentLink = `https://www.youtube.com/watch?v=${videoId}&lc=${comment.cid}`;
             const timeElement = commentElement.querySelector('.comment-time');
             if (timeElement && comment.cid) {
@@ -176,17 +185,16 @@ document.addEventListener('DOMContentLoaded', () => {
                  linkElement.href = commentLink;
                  linkElement.target = '_blank';
                  linkElement.rel = 'noopener noreferrer';
-                 linkElement.style.color = 'inherit'; // Inherit color from time span
-                 linkElement.style.textDecoration = 'none'; // Remove underline initially
-                 linkElement.textContent = timeElement.textContent; // Move text content to link
-                 linkElement.title = timeElement.title; // Move title to link
-                 timeElement.textContent = ''; // Clear original span text
-                 timeElement.appendChild(linkElement); // Add link inside the span
+                 linkElement.style.color = 'inherit';
+                 linkElement.style.textDecoration = 'none';
+                 linkElement.textContent = timeElement.textContent;
+                 linkElement.title = timeElement.title;
+                 timeElement.textContent = '';
+                 timeElement.appendChild(linkElement);
                  timeElement.style.cursor = 'pointer';
                  timeElement.onmouseover = () => linkElement.style.textDecoration = 'underline';
                  timeElement.onmouseout = () => linkElement.style.textDecoration = 'none';
             }
-
 
             fragment.appendChild(commentElement);
         });
@@ -194,19 +202,32 @@ document.addEventListener('DOMContentLoaded', () => {
         commentsContainer.appendChild(fragment);
     }
 
-    // --- Initial Load ---
-    populateVideoList(videoIds); // Use Option 1 (manual list) by default
-
-    // Check URL hash on load to potentially load a video directly
-    const initialVideoId = window.location.hash.substring(1);
-    if (initialVideoId && videoIds.includes(initialVideoId)) {
-        loadComments(initialVideoId);
-        // Highlight the corresponding link in the list
-        const activeLink = document.querySelector(`#video-list a[data-video-id="${initialVideoId}"]`);
-        if (activeLink) {
-            activeLink.classList.add('active');
-            // Scroll list item into view
-             activeLink.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+     // --- Check URL Hash on Load ---
+    function checkUrlHashForInitialLoad() {
+        const initialVideoId = window.location.hash.substring(1);
+        if (initialVideoId && availableVideoIds.includes(initialVideoId)) {
+            loadComments(initialVideoId);
+            const activeLink = document.querySelector(`#video-list a[data-video-id="${initialVideoId}"]`);
+            if (activeLink) {
+                document.querySelectorAll('#video-list a').forEach(a => a.classList.remove('active')); // Clear others first
+                activeLink.classList.add('active');
+                activeLink.scrollIntoView({ behavior: 'auto', block: 'nearest' }); // Use auto for instant scroll
+            }
+        } else if (availableVideoIds.length > 0) {
+            // Optional: Load the first video in the list if no hash is provided or hash is invalid
+            // loadComments(availableVideoIds[0]);
+            // const firstLink = document.querySelector('#video-list a');
+            // if (firstLink) firstLink.classList.add('active');
+            // window.location.hash = availableVideoIds[0]; // Optionally update hash
+        } else {
+             // No videos loaded, ensure placeholder text is shown
+             commentsContainer.innerHTML = '<p>Select a video from the list on the left (if available) to view comments.</p>';
+             currentVideoTitleElement.textContent = 'Select a Video';
+             videoLinkContainer.style.display = 'none';
         }
     }
+
+    // --- Initial Load ---
+    loadVideoList(); // Start by fetching the manifest
+
 });
