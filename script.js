@@ -13,11 +13,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Option 1: Manually list your video IDs here.
     // This is simpler to start but requires manual updates.
     const videoIds = [
-        "VIDEO_ID_1", // Replace with actual video IDs
-        "VIDEO_ID_2",
-        "VIDEO_ID_3",
-        "dQw4w9WgXcQ", // Example placeholder
-        "your_actual_video_id_here"
+        "qgYK9k2KF7Q", // Replace with actual video IDs
+        "56JvXvA51ls", // Add more video IDs as needed
         // Add all your video IDs from the 'data' folder filenames (without .json)
     ];
 
